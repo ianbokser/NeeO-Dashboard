@@ -3,11 +3,18 @@ import { getWalletTransactions } from '../service/walletTransactions.service';
 
 export const getTransactions = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { wallet, fromBlock, toBlock, limit, pageCursor } = req.query;
+        const { wallet, network, fromBlock, toBlock, limit, pageCursor } = req.query;
         
         if (!wallet || typeof wallet !== 'string') {
             res.status(400).json({ 
                 error: 'Wallet parameter is required and must be a string' 
+            });
+            return;
+        }
+
+        if (!network || typeof network !== 'string') {
+            res.status(400).json({ 
+                error: 'Network parameter is required and must be a string' 
             });
             return;
         }
@@ -62,13 +69,14 @@ export const getTransactions = async (req: Request, res: Response): Promise<void
 
         const params = {
             wallet,
+            network,
             fromBlock: parsedFromBlock,
             toBlock: parsedToBlock,
             limit: parsedLimit || 50,
             pageCursor: pageCursor as string | undefined
         };
 
-        const transactions = await getWalletTransactions(wallet, parsedFromBlock, parsedToBlock);
+        const transactions = await getWalletTransactions(wallet, network, parsedFromBlock, parsedToBlock);
         
         res.status(200).json({
             success: true,

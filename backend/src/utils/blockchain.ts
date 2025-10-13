@@ -2,9 +2,9 @@ import { HypersyncClient, JoinMode } from "@envio-dev/hypersync-client";
 import { TransactionField, BlockField } from "@envio-dev/hypersync-client"; 
 
 export class BlockchainUtils {
-    static async fetchTransactionsFromBlockchain(wallet: string, fromBlock?: number, toBlock?: number): Promise<any[]> {
+    static async fetchTransactionsFromBlockchain(wallet: string, networkUrl: string, fromBlock?: number, toBlock?: number): Promise<any[]> {
     const client = HypersyncClient.new({
-      url: "https://eth.hypersync.xyz",
+      url: networkUrl,
     });
 
     // Query para transacciones donde tu wallet es el remitente O el destinatario
@@ -43,10 +43,6 @@ export class BlockchainUtils {
       query.toBlock = toBlock;
     }
     
-    console.log(`Searching for transactions for wallet: ${wallet.toLowerCase()}`);
-    console.log(`From block: ${query.fromBlock}, To block: ${query.toBlock || 'latest'}`);
-    console.log(`Network: Ethereum Mainnet`);
-
     const resultTxs: any[] = [];
 
     const stream = await client.stream(query, { reverse: true });

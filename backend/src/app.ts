@@ -1,6 +1,4 @@
-import express from "express"
-import { HypersyncClient } from "@envio-dev/hypersync-client"
-import { isExpression } from "typescript";
+import express from "express";
 import { getTransactions } from "./controller/transactions.controller";
 
 
