@@ -13,7 +13,7 @@ app.get("/", (req, res) => {
     res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-app.get("/api/transactions/:wallet", getTransactions);
+app.get("/api/transactions", getTransactions);
 
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
