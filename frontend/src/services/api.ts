@@ -4,7 +4,7 @@ import { TransactionResponse, ApiError, Transaction } from '../types';
 // Configure axios instance
 const api = axios.create({
   baseURL: 'http://localhost:3001/api',
-  timeout: 10000,
+  timeout: 30000, // Increased timeout to 30 seconds for blockchain APIs
   headers: {
     'Content-Type': 'application/json',
   },
@@ -19,6 +19,30 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+// Retry function with exponential backoff
+const retryRequest = async (fn: () => Promise<any>, maxRetries: number = 3): Promise<any> => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const isLastAttempt = attempt === maxRetries;
+      const isTimeoutError = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
+      const isNetworkError = error.code === 'NETWORK_ERROR' || !error.response;
+      
+      // Only retry on timeout or network errors
+      if (isLastAttempt || (!isTimeoutError && !isNetworkError)) {
+        throw error;
+      }
+      
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+      console.log(`Request failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms...`);
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+};
 
 // Response interceptor
 api.interceptors.response.use(
@@ -40,19 +64,23 @@ api.interceptors.response.use(
 // API service functions
 export const transactionService = {
   /**
-   * Fetch transactions for a specific wallet and network
+   * Fetch transactions for a specific wallet and network with retry logic
    */
   async getTransactions(
     wallet: string,
     network: string = 'ethereum',
+    signal?: AbortSignal
   ): Promise<TransactionResponse> {
+    const requestFn = () => api.get('/transactions', {
+      params: {
+        wallet,
+        network,
+      },
+      signal, // Support for request cancellation
+    });
+
     try {
-      const response = await api.get('/transactions', {
-        params: {
-          wallet,
-          network,
-        },
-      });
+      const response = await retryRequest(requestFn, 3);
       console.log('Fetched transactions:', response.data);
       
       const data = response.data;
@@ -64,34 +92,48 @@ export const transactionService = {
         limit: data.limit
       };
 
-    } catch (error) {
+    } catch (error: any) {
+      // Don't retry if request was aborted
+      if (signal?.aborted) {
+        throw new Error('Request was cancelled');
+      }
       throw error as ApiError;
     }
   },
 
-  async getTransactionByHash(hash: string, network: string = 'ethereum'): Promise<Transaction> {
-    try {
-      const response = await api.get(`/transactions/${hash}`, {
-        params: { network },
-      });
+  async getTransactionByHash(hash: string, network: string = 'ethereum', signal?: AbortSignal): Promise<Transaction> {
+    const requestFn = () => api.get(`/transactions/${hash}`, {
+      params: { network },
+      signal,
+    });
 
+    try {
+      const response = await retryRequest(requestFn, 2); // Fewer retries for single transaction
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
+      if (signal?.aborted) {
+        throw new Error('Request was cancelled');
+      }
       throw error as ApiError;
     }
   },
 
-  async getWalletBalance(wallet: string, network: string = 'ethereum'): Promise<{ balance: string }> {
-    try {
-      const response = await api.get('/wallet/balance', {
-        params: {
-          wallet,
-          network,
-        },
-      });
+  async getWalletBalance(wallet: string, network: string = 'ethereum', signal?: AbortSignal): Promise<{ balance: string }> {
+    const requestFn = () => api.get('/wallet/balance', {
+      params: {
+        wallet,
+        network,
+      },
+      signal,
+    });
 
+    try {
+      const response = await retryRequest(requestFn, 2);
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
+      if (signal?.aborted) {
+        throw new Error('Request was cancelled');
+      }
       throw error as ApiError;
     }
   },
