@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TransactionTable, ErrorComponent, LoadingWithRetry } from '../components';
-import { SkeletonStats } from '../components/Skeleton';
+import { SkeletonStats, SkeletonTable } from '../components/Skeleton';
 import { useWallet } from '../hooks/useWallet';
 
 const DashboardPage: React.FC = () => {
@@ -20,7 +20,10 @@ const DashboardPage: React.FC = () => {
   // Handle retry
   const handleRetry = () => {
     if (isConnected) {
+      // Reset error state before refreshing
       refreshWalletData();
+    } else {
+      connectWallet();
     }
   };
 

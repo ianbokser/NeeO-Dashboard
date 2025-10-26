@@ -26,11 +26,17 @@ export const useWallet = () => {
   
   // Timeout para debouncing
   const debounceTimeoutRef = useRef<number | null>(null);
+  
+  // Ref para tracking de la última carga exitosa
+  const lastLoadRef = useRef<{ account: string; chain: string } | null>(null);
+  
+  // Ref para prevenir inicialización múltiple
+  const initializingRef = useRef<boolean>(false);
 
   /**
    * Cargar transacciones para la cuenta actual con debouncing y control de concurrencia
    */
-  const loadTransactions = useCallback(async (immediate: boolean = false) => {
+  const loadTransactions = useCallback(async (immediate: boolean = false, force: boolean = false) => {
     if (!state.currentAccount || !state.currentChain) {
       return;
     }
@@ -38,6 +44,15 @@ export const useWallet = () => {
     // Evitar múltiples llamadas simultáneas
     if (loadingRef.current && !immediate) {
       console.log('Transaction loading already in progress, skipping...');
+      return;
+    }
+
+    // Verificar si ya hemos cargado para esta combinación account/chain
+    const currentKey = `${state.currentAccount}-${state.currentChain.chainId}`;
+    const lastLoadKey = lastLoadRef.current ? `${lastLoadRef.current.account}-${lastLoadRef.current.chain}` : null;
+    
+    if (!force && lastLoadKey === currentKey && state.transactions.length > 0) {
+      console.log('Transactions already loaded for current account/chain, skipping...');
       return;
     }
 
@@ -50,8 +65,8 @@ export const useWallet = () => {
     // Si no es inmediato, aplicar debouncing
     if (!immediate) {
       debounceTimeoutRef.current = setTimeout(() => {
-        loadTransactions(true);
-      }, 500); // 500ms de debouncing
+        loadTransactions(true, force);
+      }, 300); // Reducido a 300ms
       return;
     }
 
@@ -103,11 +118,23 @@ export const useWallet = () => {
       }
 
       dispatch({ type: 'SET_TRANSACTIONS', payload: response.transactions });
+      
+      // Actualizar ref de última carga exitosa
+      lastLoadRef.current = {
+        account: state.currentAccount,
+        chain: state.currentChain.chainId
+      };
+      
       console.log(`Successfully loaded ${response.transactions.length} transactions`);
       
     } catch (error: any) {
-      if (signal.aborted || error.message?.includes('cancelled')) {
+      if (signal.aborted || error.message?.includes('cancelled') || error.code === 'ERR_CANCELED') {
         console.log('Transaction loading was cancelled');
+        // Limpiar loading state cuando se cancela
+        loadingRef.current = false;
+        if (!signal.aborted) {
+          dispatch({ type: 'SET_TRANSACTIONS_LOADING', payload: false });
+        }
         return;
       }
       
@@ -158,8 +185,8 @@ export const useWallet = () => {
 
         // Cargar transacciones automáticamente con un pequeño delay
         setTimeout(() => {
-          loadTransactions(true); // immediate = true para evitar debouncing en conexión inicial
-        }, 1000); // Aumentado a 1 segundo para dar tiempo a la conexión
+          loadTransactions(true, true); // immediate = true, force = true para conexión inicial
+        }, 500); // Reducido a 500ms
       }
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -257,10 +284,13 @@ export const useWallet = () => {
     dispatch({ type: 'SET_ACCOUNTS', payload: updatedAccounts });
     dispatch({ type: 'SET_CURRENT_ACCOUNT', payload: accountAddress });
 
-    // Recargar transacciones para la nueva cuenta
+    // Limpiar transacciones anteriores y recargar para la nueva cuenta
+    dispatch({ type: 'SET_TRANSACTIONS', payload: [] });
+    lastLoadRef.current = null;
+    
     setTimeout(() => {
-      loadTransactions(true); // immediate = true para cambio de cuenta
-    }, 500);
+      loadTransactions(true, true); // immediate = true, force = true para cambio de cuenta
+    }, 300);
   }, [state.isConnected, state.accounts, dispatch, loadTransactions]);
 
   /**
@@ -272,6 +302,19 @@ export const useWallet = () => {
     }
 
     try {
+      // Cancelar cualquier petición en curso
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // Limpiar estado de loading anterior
+      loadingRef.current = false;
+      dispatch({ type: 'SET_TRANSACTIONS_LOADING', payload: false });
+      
+      // Limpiar transacciones anteriores
+      dispatch({ type: 'SET_TRANSACTIONS', payload: [] });
+      lastLoadRef.current = null;
+
       // Actualizar cuentas
       const accounts = await getConnectedAccounts();
       if (accounts && accounts.length > 0) {
@@ -288,8 +331,10 @@ export const useWallet = () => {
         dispatch({ type: 'SET_CURRENT_CHAIN', payload: chainInfo });
       }
 
-      // Recargar transacciones
-      await loadTransactions(true); // immediate = true para refresh manual
+      // Recargar transacciones con un breve delay
+      setTimeout(() => {
+        loadTransactions(true, true); // immediate = true, force = true para refresh manual
+      }, 200);
     } catch (error) {
       console.error('Error refreshing wallet data:', error);
     }
@@ -323,10 +368,12 @@ export const useWallet = () => {
           dispatch({ type: 'SET_CURRENT_CHAIN', payload: chainInfo });
         }
 
-        // Cargar transacciones
-        setTimeout(() => {
-          loadTransactions(true); // immediate = true para conexión existente
-        }, 1000);
+        // Cargar transacciones solo si no las tenemos ya
+        if (state.transactions.length === 0) {
+          setTimeout(() => {
+            loadTransactions(true, true); // immediate = true, force = true para conexión existente
+          }, 500);
+        }
       }
     } catch (error) {
       console.error('Error checking existing connection:', error);
@@ -356,10 +403,13 @@ export const useWallet = () => {
           dispatch({ type: 'SET_ACCOUNTS', payload: accountsList });
           dispatch({ type: 'SET_CURRENT_ACCOUNT', payload: accounts[0] });
           
-          // Recargar transacciones
+          // Limpiar transacciones anteriores y cargar nuevas
+          dispatch({ type: 'SET_TRANSACTIONS', payload: [] });
+          lastLoadRef.current = null;
+          
           setTimeout(() => {
-            loadTransactions(true); // immediate = true para cambio de cuenta
-          }, 500);
+            loadTransactions(true, true); // immediate = true, force = true para cambio de cuenta
+          }, 300);
         }
       },
       onChainChanged: async (chainId: string) => {
@@ -367,10 +417,13 @@ export const useWallet = () => {
         if (chainInfo) {
           dispatch({ type: 'SET_CURRENT_CHAIN', payload: chainInfo });
           
-          // Recargar transacciones para la nueva chain
+          // Limpiar transacciones anteriores y cargar para nueva chain
+          dispatch({ type: 'SET_TRANSACTIONS', payload: [] });
+          lastLoadRef.current = null;
+          
           setTimeout(() => {
-            loadTransactions(true); // immediate = true para cambio de chain
-          }, 500);
+            loadTransactions(true, true); // immediate = true, force = true para cambio de chain
+          }, 300);
         }
       },
       onConnect: (connectInfo) => {
@@ -405,8 +458,11 @@ export const useWallet = () => {
    * Verificar conexión existente al montar el componente
    */
   useEffect(() => {
-    checkExistingConnection();
-  }, [checkExistingConnection]);
+    if (!initializingRef.current) {
+      initializingRef.current = true;
+      checkExistingConnection();
+    }
+  }, []); // Removed dependency to prevent re-runs
 
   return {
     // Estado

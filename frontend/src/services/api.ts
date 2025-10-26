@@ -29,6 +29,12 @@ const retryRequest = async (fn: () => Promise<any>, maxRetries: number = 3): Pro
       const isLastAttempt = attempt === maxRetries;
       const isTimeoutError = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
       const isNetworkError = error.code === 'NETWORK_ERROR' || !error.response;
+      const isCancelError = error.code === 'ERR_CANCELED' || error.message?.includes('canceled');
+      
+      // Don't retry on canceled requests
+      if (isCancelError) {
+        throw error;
+      }
       
       // Only retry on timeout or network errors
       if (isLastAttempt || (!isTimeoutError && !isNetworkError)) {
@@ -50,6 +56,11 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    // Don't log canceled requests as errors
+    if (error.code === 'ERR_CANCELED' || error.message?.includes('canceled')) {
+      return Promise.reject(error);
+    }
+    
     const apiError: ApiError = {
       message: error.response?.data?.message || error.message || 'An unexpected error occurred',
       code: error.response?.data?.code || error.code,
